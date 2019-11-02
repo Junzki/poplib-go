@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io/ioutil"
 	"net"
+	"sync"
 
 	log "github.com/sirupsen/logrus"
 )
@@ -49,6 +50,7 @@ type Client struct {
 	Timeout  uint
 
 	fd        net.Conn
+	mutex     sync.Mutex
 	certs     *x509.CertPool
 	tlsConfig *tls.Config
 }
@@ -58,7 +60,7 @@ func (c Client) Addr() string {
 	return fmt.Sprintf("%s:%d", c.Host, c.Port)
 }
 
-// NewClient initializs a new client instance.
+// NewClient initializes a new client instance.
 func NewClient(host string, port uint, timeout uint) (*Client, error) {
 	if 0 == port || "" == host {
 		return nil, errors.New("bad host or port")
@@ -205,6 +207,10 @@ func (c *Client) Close() error {
 	c.fd = nil
 
 	return err
+}
+
+func (c *Client) readline() ([]byte, error) {
+
 }
 
 func (c *Client) WriteCmd(cmd []byte) (*bufio.Reader, error) {
