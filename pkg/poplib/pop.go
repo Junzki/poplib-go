@@ -24,23 +24,18 @@ const (
 	defaultTimeout = 1
 	netProtocol    = "tcp"
 	bufSiz         = uint(4096)
+
+	// POP protocol response prefix.
+	prefixOk  = byte('+')
+	prefixErr = byte('-')
 )
 
 // Line terminators (we always output CRLF, but accept any of CRLF, LF)
 var (
-	// CR -> "r"
-	CR = []byte("\r")
-
-	// LF -> "\n"
-	LF = []byte("\n")
-
-	// CRLF -> "\r\n"
-	CRLF = []byte("\r\n")
-
 	logger = log.StandardLogger()
 )
 
-// Client is implmented POP3 client, according to RFC 1939.
+// Client is implemented POP3 client, according to RFC 1939.
 type Client struct {
 	Host     string
 	Port     uint
@@ -210,29 +205,59 @@ func (c *Client) Close() error {
 }
 
 func (c *Client) readline() ([]byte, error) {
-
-}
-
-func (c *Client) WriteCmd(cmd []byte) (*bufio.Reader, error) {
-	if nil == c.fd {
-		return nil, errors.New("not connected or connection closed")
-	}
-
-	cmd = append(cmd, CRLF...)
-	_, err := c.fd.Write(cmd)
-	if nil != err {
-		return nil, nil
-	}
-
-	buf := make([]byte, bufSiz)
-	_, err = c.fd.Read(buf)
+	reader := bufio.NewReader(c.fd)
+	line, _, err := reader.ReadLine()
 	if nil != err {
 		return nil, err
 	}
 
-	reader := bufio.NewReader(bytes.NewBuffer(buf))
+	prefix := line[0]
+	switch prefix {
+	case prefixErr:
+		return nil, errors.New(string(line))
+	case prefixOk:
+		return line, nil
+	default:
+		return nil, errors.New(string(line))
+	}
+}
+
+func (c *Client) WriteCmd(cmd []byte) (*bufio.Reader, error) {
+	var (
+		err error = nil
+	)
+	cmd, err = cleanCmd(cmd)
+	if nil != err {
+		return nil, err
+	}
+
+	c.mutex.Lock()
+	if nil == c.fd {
+		c.mutex.Unlock()
+		return nil, errors.New("not connected or connection closed")
+	}
+
+	r, err := c.writeCmd(cmd)
+	c.mutex.Unlock()
+	return r, err
+}
+
+func (c *Client) writeCmd(cmd []byte) (*bufio.Reader, error) {
+	_, err := c.fd.Write(cmd)
+	if nil != err {
+		c.mutex.Unlock()
+		return nil, nil
+	}
+
+	line, err := c.readline()
+	if nil != err {
+		return nil, err
+	}
+
+	reader := bufio.NewReader(bytes.NewBuffer(line))
 	return reader, nil
 }
+
 
 func (c *Client) Auth(user, password string) error {
 	userCmd := fmt.Sprintf("USER %s", user)
