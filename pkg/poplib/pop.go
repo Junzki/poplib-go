@@ -24,15 +24,15 @@ const (
 	defaultTimeout = 1
 	netProtocol    = "tcp"
 	bufSiz         = uint(4096)
-
-	// POP protocol response prefix.
-	prefixOk  = byte('+')
-	prefixErr = byte('-')
 )
 
 // Line terminators (we always output CRLF, but accept any of CRLF, LF)
 var (
 	logger = log.StandardLogger()
+
+	// POP protocol response prefix.
+	prefixOk  = []byte("+OK")
+	prefixErr = []byte("-ERR")
 )
 
 // Client is implemented POP3 client, according to RFC 1939.
@@ -149,11 +149,18 @@ func (c *Client) loadCerts() error {
 }
 
 func (c *Client) Connect() error {
+	var err error = nil
+
+	c.mutex.Lock()
 	if c.UseTLS {
-		return c.connectTLS()
+		err = c.connectTLS()
+		c.mutex.Unlock()
+		return err
 	}
 
-	return c.connect()
+	err = c.connect()
+	c.mutex.Unlock()
+	return err
 }
 
 func (c *Client) connect() error {
@@ -177,22 +184,22 @@ func (c *Client) connectTLS() error {
 }
 
 func (c *Client) GetWelcome() ([]byte, error) {
-	buf := make([]byte, bufSiz)
-	_, err := c.fd.Read(buf)
-
+	c.mutex.Lock()
+	line, err := c.readFirstLine()
 	if nil != err {
+		c.mutex.Unlock()
 		return nil, err
 	}
 
-	reader := bufio.NewReader(bytes.NewBuffer(buf))
-	line, _, err := reader.ReadLine()
-
+	c.mutex.Unlock()
 	logger.Debug(string(line))
-	return line, err
+	return line, nil
 }
 
 func (c *Client) Close() error {
+	c.mutex.Lock()
 	if nil == c.fd {
+		c.mutex.Unlock()
 		return nil
 	}
 
@@ -201,25 +208,22 @@ func (c *Client) Close() error {
 	err := c.fd.Close()
 	c.fd = nil
 
+	c.mutex.Unlock()
 	return err
 }
 
-func (c *Client) readline() ([]byte, error) {
+func (c *Client) readFirstLine() ([]byte, error) {
 	reader := bufio.NewReader(c.fd)
 	line, _, err := reader.ReadLine()
 	if nil != err {
 		return nil, err
 	}
 
-	prefix := line[0]
-	switch prefix {
-	case prefixErr:
-		return nil, errors.New(string(line))
-	case prefixOk:
+	if bytes.HasPrefix(line, prefixOk) {
 		return line, nil
-	default:
-		return nil, errors.New(string(line))
 	}
+
+	return nil, errors.New(string(line))
 }
 
 func (c *Client) WriteCmd(cmd []byte) (*bufio.Reader, error) {
@@ -249,7 +253,7 @@ func (c *Client) writeCmd(cmd []byte) (*bufio.Reader, error) {
 		return nil, nil
 	}
 
-	line, err := c.readline()
+	line, err := c.readFirstLine()
 	if nil != err {
 		return nil, err
 	}
@@ -257,7 +261,6 @@ func (c *Client) writeCmd(cmd []byte) (*bufio.Reader, error) {
 	reader := bufio.NewReader(bytes.NewBuffer(line))
 	return reader, nil
 }
-
 
 func (c *Client) Auth(user, password string) error {
 	userCmd := fmt.Sprintf("USER %s", user)
@@ -300,6 +303,6 @@ func (c *Client) Stat() error {
 		return err
 	}
 
-	fmt.Println(string(buf))
+	logger.Debug(string(buf))
 	return nil
 }

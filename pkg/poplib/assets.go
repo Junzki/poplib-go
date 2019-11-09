@@ -1,6 +1,7 @@
 package poplib
 
 import (
+	"bytes"
 	"errors"
 )
 
@@ -16,4 +17,24 @@ func cleanCmd(cmd []byte) ([]byte, error) {
 
 	cmd = append(cmd, CRLF...)
 	return cmd, nil
+}
+
+func cleanResponseHeader(r []byte) []byte {
+	if nil == r {
+		return nil
+	}
+
+	if bytes.HasPrefix(r, prefixOk) {
+		// +OK ...
+		return bytes.TrimPrefix(r, prefixOk)
+	} else if bytes.HasPrefix(r, prefixErr) {
+		return bytes.TrimPrefix(r, prefixErr)
+	}
+
+	return r
+}
+
+type StatResult struct {
+	Count uint
+
 }
