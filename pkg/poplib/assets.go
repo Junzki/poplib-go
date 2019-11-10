@@ -2,39 +2,28 @@ package poplib
 
 import (
 	"bytes"
-	"errors"
+	"fmt"
 )
 
-var (
-	// CRLF -> "\r\n"
-	CRLF = []byte("\r\n")
+const (
+	// CRLF is the line-ending.
+	CRLF = "\r\n"
 )
 
-func cleanCmd(cmd []byte) ([]byte, error) {
-	if nil == cmd || 0 >= len(cmd) {
-		return nil, errors.New("cmd is nil")
+func FormatCommand(base string, args ...string) []byte {
+	cmd := base
+	for _, i := range args {
+		cmd += fmt.Sprintf(" %s", i)
 	}
 
-	cmd = append(cmd, CRLF...)
-	return cmd, nil
+	cmd += CRLF
+	return []byte(cmd)
 }
 
-func cleanResponseHeader(r []byte) []byte {
-	if nil == r {
-		return nil
-	}
-
-	if bytes.HasPrefix(r, prefixOk) {
-		// +OK ...
-		return bytes.TrimPrefix(r, prefixOk)
-	} else if bytes.HasPrefix(r, prefixErr) {
-		return bytes.TrimPrefix(r, prefixErr)
-	}
-
+// TrimPrefix removes the "+OK<space>" prefix from
+// response line.
+func TrimPrefix(v []byte) []byte {
+	r := bytes.TrimPrefix(v, prefixOk)
+	r = bytes.Trim(r, " ")
 	return r
-}
-
-type StatResult struct {
-	Count uint
-
 }

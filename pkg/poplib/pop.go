@@ -24,6 +24,8 @@ const (
 	defaultTimeout = 1
 	netProtocol    = "tcp"
 	bufSiz         = uint(4096)
+
+	CommandQuit = "QUIT"
 )
 
 // Line terminators (we always output CRLF, but accept any of CRLF, LF)
@@ -31,8 +33,7 @@ var (
 	logger = log.StandardLogger()
 
 	// POP protocol response prefix.
-	prefixOk  = []byte("+OK")
-	prefixErr = []byte("-ERR")
+	prefixOk = []byte("+OK")
 )
 
 // Client is implemented POP3 client, according to RFC 1939.
@@ -203,7 +204,7 @@ func (c *Client) Close() error {
 		return nil
 	}
 
-	_, _ = c.WriteCmd([]byte("QUIT"))
+	_, _ = c.writeCmd(FormatCommand(CommandQuit))
 
 	err := c.fd.Close()
 	c.fd = nil
@@ -226,14 +227,18 @@ func (c *Client) readFirstLine() ([]byte, error) {
 	return nil, errors.New(string(line))
 }
 
-func (c *Client) WriteCmd(cmd []byte) (*bufio.Reader, error) {
+func (c *Client) readBody() ([]byte, error) {
+	//reader := bufio.NewReader(c.fd)
+
+	return nil, nil
+}
+
+// WriteCmd writes POP3 command to server, and
+// reads single line or long response.
+func (c *Client) WriteCmd(cmd []byte, singleLine bool) ([]byte, error) {
 	var (
 		err error = nil
 	)
-	cmd, err = cleanCmd(cmd)
-	if nil != err {
-		return nil, err
-	}
 
 	c.mutex.Lock()
 	if nil == c.fd {
@@ -242,14 +247,37 @@ func (c *Client) WriteCmd(cmd []byte) (*bufio.Reader, error) {
 	}
 
 	r, err := c.writeCmd(cmd)
+	if nil != err {
+		c.mutex.Unlock()
+		return nil, err
+	}
+
+	if singleLine {
+		c.mutex.Unlock()
+		return r, nil
+	}
+
+	body, err := c.readBody()
+	if nil != err {
+		c.mutex.Unlock()
+		return nil, err
+	}
+
+	// Join first line with its body.
+	if nil != body {
+		r = append(r, body...)
+	}
+
 	c.mutex.Unlock()
 	return r, err
 }
 
-func (c *Client) writeCmd(cmd []byte) (*bufio.Reader, error) {
+// writeCmd is the REAL executor without lock.
+// he writes command, and reads the first line of
+// response.
+func (c *Client) writeCmd(cmd []byte) ([]byte, error) {
 	_, err := c.fd.Write(cmd)
 	if nil != err {
-		c.mutex.Unlock()
 		return nil, nil
 	}
 
@@ -258,51 +286,5 @@ func (c *Client) writeCmd(cmd []byte) (*bufio.Reader, error) {
 		return nil, err
 	}
 
-	reader := bufio.NewReader(bytes.NewBuffer(line))
-	return reader, nil
-}
-
-func (c *Client) Auth(user, password string) error {
-	userCmd := fmt.Sprintf("USER %s", user)
-	passwdCmd := fmt.Sprintf("PASS %s", password)
-
-	reader, err := c.WriteCmd([]byte(userCmd))
-	if nil != err {
-		return err
-	}
-
-	line, _, err := reader.ReadLine()
-	if nil != err {
-		return err
-	}
-	logger.Debug(string(line))
-
-	reader, err = c.WriteCmd([]byte(passwdCmd))
-	if nil != err {
-		return err
-	}
-
-	line, _, err = reader.ReadLine()
-	if nil != err {
-		return err
-	}
-	logger.Debug(string(line))
-
-	return nil
-}
-
-func (c *Client) Stat() error {
-	reader, err := c.WriteCmd([]byte("STAT"))
-	if nil != err {
-		return err
-	}
-
-	buf := make([]byte, bufSiz)
-	_, err = reader.Read(buf)
-	if nil != err {
-		return err
-	}
-
-	logger.Debug(string(buf))
-	return nil
+	return line, nil
 }
